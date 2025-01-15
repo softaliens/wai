@@ -23,27 +23,22 @@
 --
 -- @since 0.1.2
 module Control.Debounce (
-    -- * Creation
-    mkDebounce,
-
-    -- * Settings
+    -- * Type
     DI.DebounceSettings,
     defaultDebounceSettings,
 
-    -- ** Accessors
+    -- * Accessors
     DI.debounceFreq,
     DI.debounceAction,
     DI.debounceEdge,
-    DI.debounceThreadName,
-
-    -- ** Edge types
     DI.leadingEdge,
-    DI.leadingMuteEdge,
     DI.trailingEdge,
-    DI.trailingDelayEdge,
+
+    -- * Creation
+    mkDebounce,
 ) where
 
-import Control.Concurrent (newMVar, threadDelay)
+import Control.Concurrent (newEmptyMVar, threadDelay)
 import qualified Control.Debounce.Internal as DI
 
 -- | Default value for creating a 'DebounceSettings'.
@@ -55,16 +50,12 @@ defaultDebounceSettings =
         { DI.debounceFreq = 1000000
         , DI.debounceAction = return ()
         , DI.debounceEdge = DI.leadingEdge
-        , DI.debounceThreadName = "Debounce"
         }
 
 -- | Generate an action which will trigger the debounced action to be performed.
 --
--- /N.B. The generated action will always immediately return, regardless of the 'debounceFreq',/
--- /as the debounced action (and the delay\/cooldown) is always performed in a separate thread./
---
 -- @since 0.1.2
 mkDebounce :: DI.DebounceSettings -> IO (IO ())
 mkDebounce settings = do
-    baton <- newMVar ()
+    baton <- newEmptyMVar
     DI.mkDebounceInternal baton threadDelay settings

@@ -6,7 +6,6 @@ module Network.Wai.Handler.Warp.Counter (
     waitForZero,
     increase,
     decrease,
-    waitForDecreased,
 ) where
 
 import Control.Concurrent.STM
@@ -19,19 +18,12 @@ newCounter :: IO Counter
 newCounter = Counter <$> newTVarIO 0
 
 waitForZero :: Counter -> IO ()
-waitForZero (Counter var) = atomically $ do
-    x <- readTVar var
+waitForZero (Counter ref) = atomically $ do
+    x <- readTVar ref
     when (x > 0) retry
 
-waitForDecreased :: Counter -> IO ()
-waitForDecreased (Counter var) = do
-    n0 <- atomically $ readTVar var
-    atomically $ do
-        n <- readTVar var
-        check (n < n0)
-
 increase :: Counter -> IO ()
-increase (Counter var) = atomically $ modifyTVar' var $ \x -> x + 1
+increase (Counter ref) = atomically $ modifyTVar' ref $ \x -> x + 1
 
 decrease :: Counter -> IO ()
-decrease (Counter var) = atomically $ modifyTVar' var $ \x -> x - 1
+decrease (Counter ref) = atomically $ modifyTVar' ref $ \x -> x - 1

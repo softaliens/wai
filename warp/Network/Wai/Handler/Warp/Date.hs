@@ -5,12 +5,7 @@ module Network.Wai.Handler.Warp.Date (
     GMTDate,
 ) where
 
-import Control.AutoUpdate (
-    defaultUpdateSettings,
-    mkAutoUpdate,
-    updateAction,
-    updateThreadName,
- )
+import Control.AutoUpdate (defaultUpdateSettings, mkAutoUpdate, updateAction)
 import Data.ByteString
 import Network.HTTP.Date
 
@@ -34,7 +29,6 @@ initialize =
     mkAutoUpdate
         defaultUpdateSettings
             { updateAction = formatHTTPDate <$> getCurrentHTTPDate
-            , updateThreadName = "Date cacher (AutoUpdate)"
             }
 
 #ifdef WINDOWS

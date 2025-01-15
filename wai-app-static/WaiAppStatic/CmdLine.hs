@@ -132,7 +132,7 @@ runCommandLine middleware = do
             port
             (if noindex then "no" else show index)
     let middle =
-            gzip defaultGzipSettings{gzipFiles = GzipCompress}
+            gzip def{gzipFiles = GzipCompress}
                 . (if verbose then logStdout else id)
                 . middleware clArgs
     runSettings

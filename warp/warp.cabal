@@ -1,6 +1,6 @@
 cabal-version:      >=1.10
 name:               warp
-version:            3.4.7
+version:            3.4.2
 license:            MIT
 license-file:       LICENSE
 maintainer:         michael@snoyman.com
@@ -85,8 +85,7 @@ library
     build-depends:
         base >=4.12 && <5,
         array,
-        auto-update >=0.2.2 && <0.3,
-        async,
+        auto-update >=0.2 && <0.3,
         bsb-http-chunked <0.1,
         bytestring >=0.9.1.4,
         case-insensitive >=0.2,
@@ -102,10 +101,11 @@ library
         stm >=2.3,
         streaming-commons >=0.1.10,
         text,
-        time-manager >=0.2 && <0.3,
+        time-manager >=0.1 && <0.2,
         vault >=0.3,
         wai >=3.2.4 && <3.3,
-        word8
+        word8,
+        unliftio
 
     if flag(x509)
         build-depends: crypton-x509
@@ -217,7 +217,6 @@ test-suite spec
         QuickCheck,
         array,
         auto-update,
-        async,
         bsb-http-chunked <0.1,
         bytestring >=0.9.1.4,
         case-insensitive >=0.2,
@@ -241,7 +240,8 @@ test-suite spec
         time-manager,
         vault,
         wai >=3.2.2.1 && <3.3,
-        word8
+        word8,
+        unliftio
 
     if flag(x509)
         build-depends: crypton-x509
@@ -295,7 +295,7 @@ benchmark parser
         bytestring,
         case-insensitive,
         containers,
-        criterion,
+        gauge,
         ghc-prim,
         hashable,
         http-date,
@@ -306,6 +306,7 @@ benchmark parser
         streaming-commons,
         text,
         time-manager,
+        unliftio,
         vault,
         wai,
         word8

@@ -25,7 +25,6 @@ module Control.Reaper (
     reaperCons,
     reaperNull,
     reaperEmpty,
-    reaperThreadName,
 
     -- * Type
     Reaper,
@@ -42,10 +41,11 @@ module Control.Reaper (
     mkListAction,
 ) where
 
+import Control.AutoUpdate.Util (atomicModifyIORef')
 import Control.Concurrent (ThreadId, forkIO, killThread, threadDelay)
 import Control.Exception (mask_)
 import Control.Reaper.Internal
-import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import GHC.Conc.Sync (labelThread)
 
 -- | Settings for creating a reaper. This type has two parameters:
@@ -94,12 +94,6 @@ data ReaperSettings workload item = ReaperSettings
     -- Default: empty list.
     --
     -- @since 0.1.1
-    , reaperThreadName :: String
-    -- ^ Label of the thread spawned by the reaper.
-    --
-    -- Default: @"Reaper"@.
-    --
-    -- @since 0.2.2
     }
 
 -- | Default @ReaperSettings@ value, biased towards having a list of work
@@ -114,7 +108,6 @@ defaultReaperSettings =
         , reaperCons = (:)
         , reaperNull = null
         , reaperEmpty = []
-        , reaperThreadName = "Reaper"
         }
 
 -- | State of reaper.
@@ -189,7 +182,7 @@ spawn
     -> IO ()
 spawn settings stateRef tidRef = do
     tid <- forkIO $ reaper settings stateRef tidRef
-    labelThread tid $ reaperThreadName settings
+    labelThread tid "Reaper"
     writeIORef tidRef $ Just tid
 
 reaper
@@ -206,12 +199,8 @@ reaper settings@ReaperSettings{..} stateRef tidRef = do
     !merge <- reaperAction wl
     -- Merging the left jobs and new jobs.
     -- If there is no jobs, this thread finishes.
-    cont <- atomicModifyIORef' stateRef (check merge)
-    if cont
-        then
-            reaper settings stateRef tidRef
-        else
-            writeIORef tidRef Nothing
+    next <- atomicModifyIORef' stateRef (check merge)
+    next
   where
     swapWithEmpty NoReaper = error "Control.Reaper.reaper: unexpected NoReaper (1)"
     swapWithEmpty (Workload wl) = (Workload reaperEmpty, wl)
@@ -219,9 +208,9 @@ reaper settings@ReaperSettings{..} stateRef tidRef = do
     check _ NoReaper = error "Control.Reaper.reaper: unexpected NoReaper (2)"
     check merge (Workload wl)
         -- If there is no job, reaper is terminated.
-        | reaperNull wl' = (NoReaper, False)
+        | reaperNull wl' = (NoReaper, writeIORef tidRef Nothing)
         -- If there are jobs, carry them out.
-        | otherwise = (Workload wl', True)
+        | otherwise = (Workload wl', reaper settings stateRef tidRef)
       where
         wl' = merge wl
 

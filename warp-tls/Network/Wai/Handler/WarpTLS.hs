@@ -56,22 +56,10 @@ module Network.Wai.Handler.WarpTLS (
 ) where
 
 import Control.Applicative ((<|>))
-import Control.Exception (
-    Exception,
-    IOException,
-    SomeException (..),
-    bracket,
-    finally,
-    fromException,
-    handle,
-    handleJust,
-    onException,
-    throwIO,
-    try,
- )
 import Control.Monad (guard, void)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
+import Data.Default.Class (def)
 import qualified Data.IORef as I
 import Data.Streaming.Network (bindPortTCP, safeRecv)
 import Data.Typeable (Typeable)
@@ -86,7 +74,6 @@ import Network.Socket (
 #endif
     withSocketsDo,
  )
-import qualified Control.Exception as E
 import Network.Socket.BufferPool
 import Network.Socket.ByteString (sendAll)
 import qualified Network.TLS as TLS
@@ -96,7 +83,23 @@ import Network.Wai.Handler.Warp
 import Network.Wai.Handler.Warp.Internal
 import Network.Wai.Handler.WarpTLS.Internal
 import System.IO.Error (ioeGetErrorType, isEOFError)
-import System.Timeout (timeout)
+import UnliftIO.Exception (
+    Exception,
+    IOException,
+    SomeException (..),
+    bracket,
+    finally,
+    fromException,
+    handle,
+    handleAny,
+    handleJust,
+    onException,
+    throwIO,
+    try,
+ )
+import qualified UnliftIO.Exception as E
+import UnliftIO.Concurrent (newEmptyMVar, putMVar, takeMVar, forkIOWithUnmask)
+import UnliftIO.Timeout (timeout)
 
 ----------------------------------------------------------------
 
@@ -256,7 +259,7 @@ runTLSSocket' tlsset@TLSSettings{..} set credentials mgr sock =
   where
     get = getter tlsset set sock params
     params =
-        TLS.defaultParamsServer
+        def -- TLS.ServerParams
             { TLS.serverWantClientCert = tlsWantClientCert
             , TLS.serverCACertificates = []
             , TLS.serverDHEParams = tlsServerDHEParams
@@ -275,12 +278,12 @@ runTLSSocket' tlsset@TLSSettings{..} set credentials mgr sock =
                     <|> (if settingsHTTP2Enabled set then Just alpn else Nothing)
             }
     shared =
-        TLS.defaultShared
+        def
             { TLS.sharedCredentials = credentials
             , TLS.sharedSessionManager = mgr
             }
     supported =
-        TLS.defaultSupported
+        def -- TLS.Supported
             { TLS.supportedVersions = tlsAllowedVersions
             , TLS.supportedCiphers = tlsCiphers
             , TLS.supportedCompressions = [TLS.nullCompression]
@@ -321,8 +324,12 @@ mkConn
     -> params
     -> IO (Connection, Transport)
 mkConn tlsset set s params = do
-    let tm = settingsTimeout set * 1000000
-    mbs <- timeout tm recvFirstBS
+    var <- newEmptyMVar
+    _ <- forkIOWithUnmask $ \umask -> do
+        let tm = settingsTimeout set * 1000000
+        mct <- umask (timeout tm recvFirstBS)
+        putMVar var mct
+    mbs <- takeMVar var
     case mbs of
       Nothing -> throwIO IncompleteHeaders
       Just bs -> switch bs
@@ -335,17 +342,6 @@ mkConn tlsset set s params = do
 
 ----------------------------------------------------------------
 
-isAsyncException :: Exception e => e -> Bool
-isAsyncException e =
-    case E.fromException (E.toException e) of
-        Just (E.SomeAsyncException _) -> True
-        Nothing -> False
-
-throughAsync :: IO a -> SomeException -> IO a
-throughAsync action (SomeException e)
-  | isAsyncException e = E.throwIO e
-  | otherwise          = action
-
 httpOverTls
     :: TLS.TLSParams params
     => TLSSettings
@@ -354,7 +350,7 @@ httpOverTls
     -> S.ByteString
     -> params
     -> IO (Connection, Transport)
-httpOverTls TLSSettings{..} set s bs0 params =
+httpOverTls TLSSettings{..} _set s bs0 params =
     makeConn `onException` close s
   where
     makeConn = do
@@ -363,21 +359,16 @@ httpOverTls TLSSettings{..} set s bs0 params =
         let recvN = wrappedRecvN rawRecvN
         ctx <- TLS.contextNew (backend recvN) params
         TLS.contextHookSetLogging ctx tlsLogging
-        let tm = settingsTimeout set * 1000000
-        mconn <- timeout tm $ do
-            TLS.handshake ctx
-            mysa <- getSocketName s
-            attachConn mysa ctx
-        case mconn of
-          Nothing -> throwIO IncompleteHeaders
-          Just conn -> return conn
-    wrappedRecvN recvN n = handle (throughAsync (return "")) $ recvN n
+        TLS.handshake ctx
+        mysa <- getSocketName s
+        attachConn mysa ctx
+    wrappedRecvN recvN n = handleAny (const mempty) $ recvN n
     backend recvN =
         TLS.Backend
             { TLS.backendFlush = return ()
 #if MIN_VERSION_network(3,1,1)
             , TLS.backendClose =
-                gracefulClose s 5000 `E.catch` throughAsync (return ())
+                gracefulClose s 5000 `E.catch` \(SomeException _) -> return ()
 #else
             , TLS.backendClose = close s
 #endif

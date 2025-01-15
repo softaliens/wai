@@ -9,11 +9,9 @@ module Network.Wai.Handler.Warp.HTTP2 (
     http2server,
 ) where
 
-import qualified Control.Exception as E
 import qualified Data.ByteString as BS
 import Data.IORef (readIORef)
 import qualified Data.IORef as I
-import GHC.Conc.Sync (labelThread, myThreadId)
 import qualified Network.HTTP2.Frame as H2
 import qualified Network.HTTP2.Server as H2
 import Network.Socket (SockAddr)
@@ -21,6 +19,7 @@ import Network.Socket.BufferPool
 import Network.Wai
 import Network.Wai.Internal (ResponseReceived (..))
 import qualified System.TimeManager as T
+import qualified UnliftIO
 
 import Network.Wai.Handler.Warp.HTTP2.File
 import Network.Wai.Handler.Warp.HTTP2.PushPromise
@@ -70,7 +69,7 @@ http2 settings ii conn transport app peersa th bs = do
     checkTLS
     setConnHTTP2 conn True
     H2.run H2.defaultServerConfig conf $
-        http2server "Warp HTTP/2" settings ii transport peersa app
+        http2server settings ii transport peersa app
   where
     checkTLS = case transport of
         TCP -> return () -- direct
@@ -81,19 +80,16 @@ http2 settings ii conn transport app peersa th bs = do
 --
 -- Since 3.3.11
 http2server
-    :: String
-    -> S.Settings
+    :: S.Settings
     -> InternalInfo
     -> Transport
     -> SockAddr
     -> Application
     -> H2.Server
-http2server label settings ii transport addr app h2req0 aux0 response = do
-    tid <- myThreadId
-    labelThread tid (label ++ " http2server " ++ show addr)
+http2server settings ii transport addr app h2req0 aux0 response = do
     req <- toWAIRequest h2req0 aux0
     ref <- I.newIORef Nothing
-    eResponseReceived <- E.try $ app req $ \rsp -> do
+    eResponseReceived <- UnliftIO.tryAny $ app req $ \rsp -> do
         (h2rsp, st, hasBody) <- fromResponse settings ii req rsp
         pps <- if hasBody then fromPushPromises ii req else return []
         I.writeIORef ref $ Just (h2rsp, pps, st)
@@ -105,9 +101,7 @@ http2server label settings ii transport addr app h2req0 aux0 response = do
             let msiz = fromIntegral <$> H2.responseBodySize h2rsp
             logResponse req st msiz
             mapM_ (logPushPromise req) pps
-        Left e
-          | isAsyncException e -> E.throwIO e
-          | otherwise -> do
+        Left e -> do
             S.settingsOnException settings (Just req) e
             let ersp = S.settingsOnExceptionResponse settings e
                 st = responseStatus ersp
@@ -137,7 +131,7 @@ http2server label settings ii transport addr app h2req0 aux0 response = do
 wrappedRecvN
     :: T.Handle -> Int -> (BufSize -> IO ByteString) -> (BufSize -> IO ByteString)
 wrappedRecvN th slowlorisSize readN bufsize = do
-    bs <- E.handle handler $ readN bufsize
+    bs <- UnliftIO.handleAny handler $ readN bufsize
     -- TODO: think about the slowloris protection in HTTP2: current code
     -- might open a slow-loris attack vector. Rather than timing we should
     -- consider limiting the per-client connections assuming that in HTTP2
@@ -148,8 +142,8 @@ wrappedRecvN th slowlorisSize readN bufsize = do
         T.tickle th
     return bs
   where
-    handler :: E.SomeException -> IO ByteString
-    handler = throughAsync (return "")
+    handler :: UnliftIO.SomeException -> IO ByteString
+    handler _ = return ""
 
 -- connClose must not be called here since Run:fork calls it
 goaway :: Connection -> H2.ErrorCodeId -> ByteString -> IO ()

@@ -11,14 +11,11 @@ module Network.Wai.Middleware.RequestLogger (
 
     -- * Create more versions
     mkRequestLogger,
-    -- ** Settings type
     RequestLoggerSettings,
     defaultRequestLoggerSettings,
-    -- *** Settings fields
     outputFormat,
     autoFlush,
     destination,
-    -- ** More settings
     OutputFormat (..),
     ApacheSettings,
     defaultApacheSettings,
@@ -26,7 +23,6 @@ module Network.Wai.Middleware.RequestLogger (
     setApacheRequestFilter,
     setApacheUserGetter,
     DetailedSettings (..),
-    defaultDetailedSettings,
     OutputFormatter,
     OutputFormatterWithDetails,
     OutputFormatterWithDetailsAndHeaders,
@@ -42,7 +38,7 @@ import qualified Data.ByteString.Builder as B (Builder, byteString)
 import Data.ByteString.Char8 (pack)
 import qualified Data.ByteString.Char8 as S8
 import qualified Data.ByteString.Lazy as LBS
-import Data.Default (Default (def))
+import Data.Default.Class (Default (def))
 import Data.IORef
 import Data.Maybe (fromMaybe, isJust, mapMaybe)
 #if __GLASGOW_HASKELL__ < 804
@@ -81,8 +77,6 @@ import Network.Wai.Parse (
  )
 
 -- | The logging format.
---
--- @since 1.3.0
 data OutputFormat
     = Apache IPAddrSource
     | -- | @since 3.1.8
@@ -165,27 +159,14 @@ data DetailedSettings = DetailedSettings
     -- ^ @since 3.1.7
     }
 
--- | DO NOT USE THIS INSTANCE!
--- Please use 'defaultDetailedSettings'
---
--- This instance will be removed in a future major version.
 instance Default DetailedSettings where
-    def = defaultDetailedSettings
-
--- | Default 'DetailedSettings'
---
--- Uses colors, but doesn't modify nor filter anything.
--- Also doesn't prelog requests.
---
--- @since 3.1.16
-defaultDetailedSettings :: DetailedSettings
-defaultDetailedSettings =
-    DetailedSettings
-        { useColors = True
-        , mModifyParams = Nothing
-        , mFilterRequests = Nothing
-        , mPrelogRequests = False
-        }
+    def =
+        DetailedSettings
+            { useColors = True
+            , mModifyParams = Nothing
+            , mFilterRequests = Nothing
+            , mPrelogRequests = False
+            }
 
 type OutputFormatter = ZonedDate -> Request -> Status -> Maybe Integer -> LogStr
 
@@ -225,52 +206,29 @@ type OutputFormatterWithDetailsAndHeaders =
     -- ^ The response headers
     -> LogStr
 
--- | Where to send the logs to.
---
--- @since 1.3.0
 data Destination
     = Handle Handle
     | Logger LoggerSet
     | Callback Callback
 
-
--- | When using a callback as a destination.
---
--- @since 1.3.0
 type Callback = LogStr -> IO ()
 
--- | Settings for the request logger.
---
--- Sets what which format,
+-- | @RequestLoggerSettings@ is an instance of Default. See <https://hackage.haskell.org/package/data-default Data.Default> for more information.
 --
 -- @outputFormat@, @autoFlush@, and @destination@ are record fields
 -- for the record type @RequestLoggerSettings@, so they can be used to
 -- modify settings values using record syntax.
---
--- @since 1.3.0
 data RequestLoggerSettings = RequestLoggerSettings
     { outputFormat :: OutputFormat
-    -- ^ Default value: @Detailed True@.
-    --
-    -- @since 1.3.0
+    -- ^ Default value: @Detailed@ @True@.
     , autoFlush :: Bool
-    -- ^ Only applies when using the 'Handle' constructor for 'destination'.
+    -- ^ Only applies when using the @Handle@ constructor for @destination@.
     --
     -- Default value: @True@.
-    --
-    -- @since 1.3.0
     , destination :: Destination
-    -- ^ Default: @Handle stdout@.
-    --
-    -- @since 1.3.0
+    -- ^ Default: @Handle@ @stdout@.
     }
 
--- | Default 'RequestLoggerSettings'.
---
--- Use this to create 'RequestLoggerSettings', and use the
--- accompanying fields to edit these settings.
---
--- @since 3.1.8
 defaultRequestLoggerSettings :: RequestLoggerSettings
 defaultRequestLoggerSettings =
     RequestLoggerSettings
@@ -279,16 +237,9 @@ defaultRequestLoggerSettings =
         , destination = Handle stdout
         }
 
--- | DO NOT USE THIS INSTANCE!
--- Please use 'defaultRequestLoggerSettings' instead.
---
--- This instance will be removed in a future major release.
 instance Default RequestLoggerSettings where
     def = defaultRequestLoggerSettings
 
--- | Create the 'Middleware' using the given 'RequestLoggerSettings'
---
--- @since 1.3.0
 mkRequestLogger :: RequestLoggerSettings -> IO Middleware
 mkRequestLogger RequestLoggerSettings{..} = do
     let (callback, flusher) =
@@ -312,7 +263,7 @@ mkRequestLogger RequestLoggerSettings{..} = do
                     getdate
             return $ apacheMiddleware apacheRequestFilter apache
         Detailed useColors ->
-            let settings = defaultDetailedSettings{useColors = useColors}
+            let settings = def{useColors = useColors}
              in detailedMiddleware callbackAndFlush settings
         DetailedWithSettings settings ->
             detailedMiddleware callbackAndFlush settings
@@ -388,16 +339,14 @@ customMiddlewareWithDetailsAndHeaders cb getdate formatter app req sendResponse 
 -- the socket (see 'IPAddrSource' for more information). It logs to 'stdout'.
 {-# NOINLINE logStdout #-}
 logStdout :: Middleware
-logStdout =
-    unsafePerformIO $
-        mkRequestLogger defaultRequestLoggerSettings{outputFormat = Apache FromSocket}
+logStdout = unsafePerformIO $ mkRequestLogger def{outputFormat = Apache FromSocket}
 
 -- | Development request logger middleware.
 --
 -- This uses the 'Detailed' 'True' logging format and logs to 'stdout'.
 {-# NOINLINE logStdoutDev #-}
 logStdoutDev :: Middleware
-logStdoutDev = unsafePerformIO $ mkRequestLogger defaultRequestLoggerSettings
+logStdoutDev = unsafePerformIO $ mkRequestLogger def
 
 -- | Prints a message using the given callback function for each request.
 -- This is not for serious production use- it is inefficient.

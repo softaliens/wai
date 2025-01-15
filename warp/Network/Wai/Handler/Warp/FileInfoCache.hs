@@ -7,7 +7,6 @@ module Network.Wai.Handler.Warp.FileInfoCache (
     getInfo, -- test purpose only
 ) where
 
-import Control.Exception (bracket, onException, throwIO)
 import Control.Reaper
 import Network.HTTP.Date
 #if WINDOWS
@@ -15,6 +14,7 @@ import System.PosixCompat.Files
 #else
 import System.Posix.Files
 #endif
+import qualified UnliftIO (bracket, onException, throwIO)
 
 import Network.Wai.Handler.Warp.HashMap (HashMap)
 import qualified Network.Wai.Handler.Warp.HashMap as M
@@ -58,7 +58,7 @@ getInfo path = do
                         , fileInfoDate = date
                         }
             return info
-        else throwIO (userError "FileInfoCache:getInfo")
+        else UnliftIO.throwIO (userError "FileInfoCache:getInfo")
 
 getInfoNaive :: FilePath -> IO FileInfo
 getInfoNaive = getInfo
@@ -69,11 +69,11 @@ getAndRegisterInfo :: FileInfoCache -> FilePath -> IO FileInfo
 getAndRegisterInfo reaper path = do
     cache <- reaperRead reaper
     case M.lookup path cache of
-        Just Negative -> throwIO (userError "FileInfoCache:getAndRegisterInfo")
+        Just Negative -> UnliftIO.throwIO (userError "FileInfoCache:getAndRegisterInfo")
         Just (Positive x) -> return x
         Nothing ->
             positive reaper path
-                `onException` negative reaper path
+                `UnliftIO.onException` negative reaper path
 
 positive :: FileInfoCache -> FilePath -> IO FileInfo
 positive reaper path = do
@@ -84,7 +84,7 @@ positive reaper path = do
 negative :: FileInfoCache -> FilePath -> IO FileInfo
 negative reaper path = do
     reaperAdd reaper (path, Negative)
-    throwIO (userError "FileInfoCache:negative")
+    UnliftIO.throwIO (userError "FileInfoCache:negative")
 
 ----------------------------------------------------------------
 
@@ -97,7 +97,7 @@ withFileInfoCache
     -> IO a
 withFileInfoCache 0 action = action getInfoNaive
 withFileInfoCache duration action =
-    bracket
+    UnliftIO.bracket
         (initialize duration)
         terminate
         (action . getAndRegisterInfo)
@@ -112,7 +112,6 @@ initialize duration = mkReaper settings
             , reaperCons = \(path, v) -> M.insert path v
             , reaperNull = M.isEmpty
             , reaperEmpty = M.empty
-            , reaperThreadName = "File info cacher (Reaper)"
             }
 
 override :: Cache -> IO (Cache -> Cache)

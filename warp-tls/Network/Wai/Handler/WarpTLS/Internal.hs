@@ -12,6 +12,7 @@ module Network.Wai.Handler.WarpTLS.Internal (
 
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
+import Data.Default.Class (def)
 import qualified Data.IORef as I
 import qualified Network.TLS as TLS
 import qualified Network.TLS.Extra as TLSExtra
@@ -32,7 +33,7 @@ data CertSettings
 instance Show CertSettings where
     show (CertFromFile a b c) = "CertFromFile " ++ show a ++ " " ++ show b ++ " " ++ show c
     show (CertFromMemory a b c) = "CertFromMemory " ++ show a ++ " " ++ show b ++ " " ++ show c
-    show CertFromRef{} = "CertFromRef"
+    show (CertFromRef _ _ _) = "CertFromRef"
 
 ----------------------------------------------------------------
 
@@ -90,7 +91,7 @@ data TLSSettings = TLSSettings
     -- to take when a client certificate is received.  See the "Network.TLS"
     -- module for details.
     --
-    -- Default: defaultServerHooks
+    -- Default: def
     --
     -- Since 3.0.2
     , tlsServerDHEParams :: Maybe TLS.DHParams
@@ -144,16 +145,16 @@ defaultTlsSettings =
     TLSSettings
         { certSettings = defaultCertSettings
         , onInsecure = DenyInsecure "This server only accepts secure HTTPS connections."
-        , tlsLogging = TLS.defaultLogging
-        , tlsAllowedVersions = TLS.supportedVersions TLS.defaultSupported
+        , tlsLogging = def
+        , tlsAllowedVersions = TLS.supportedVersions def
         , tlsCiphers = ciphers
         , tlsWantClientCert = False
-        , tlsServerHooks = TLS.defaultServerHooks
+        , tlsServerHooks = def
         , tlsServerDHEParams = Nothing
         , tlsSessionManagerConfig = Nothing
         , tlsCredentials = Nothing
         , tlsSessionManager = Nothing
-        , tlsSupportedHashSignatures = TLS.supportedHashSignatures TLS.defaultSupported
+        , tlsSupportedHashSignatures = TLS.supportedHashSignatures def
         }
 
 -- taken from stunnel example in tls-extra

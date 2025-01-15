@@ -4,17 +4,16 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
 {-# OPTIONS_GHC -fno-warn-deprecations #-}
-{-# LANGUAGE MultiWayIf #-}
 
 module Network.Wai.Handler.Warp.Run where
 
 import Control.Arrow (first)
-import qualified Control.Exception as E
+import Control.Exception (allowInterrupt)
+import qualified Control.Exception
 import qualified Data.ByteString as S
 import Data.IORef (newIORef, readIORef)
 import Data.Streaming.Network (bindPortTCP)
-import Foreign.C.Error (Errno (..), eCONNABORTED, eMFILE)
-import GHC.Conc.Sync (labelThread, myThreadId)
+import Foreign.C.Error (Errno (..), eCONNABORTED)
 import GHC.IO.Exception (IOErrorType (..), IOException (..))
 import Network.Socket (
     SockAddr,
@@ -38,6 +37,8 @@ import System.Environment (lookupEnv)
 import System.IO.Error (ioeGetErrorType)
 import qualified System.TimeManager as T
 import System.Timeout (timeout)
+import UnliftIO (toException)
+import qualified UnliftIO
 
 import Network.Wai.Handler.Warp.Buffer
 import Network.Wai.Handler.Warp.Counter
@@ -81,7 +82,7 @@ socketConnection _ s = do
                             else settingsGracefulCloseTimeout1 set
                 if tm == 0
                     then close s
-                    else gracefulClose s tm `E.catch` throughAsync (return ())
+                    else gracefulClose s tm `UnliftIO.catchAny` \(UnliftIO.SomeException _) -> return ()
 #else
             , connClose = close s
 #endif
@@ -92,12 +93,12 @@ socketConnection _ s = do
             , connMySockAddr = mysa
             }
   where
-    receive' sock pool = E.handle handler $ receive sock pool
+    receive' sock pool = UnliftIO.handleIO handler $ receive sock pool
       where
-        handler :: E.IOException -> IO ByteString
+        handler :: UnliftIO.IOException -> IO ByteString
         handler e
             | ioeGetErrorType e == InvalidArgument = return ""
-            | otherwise = E.throwIO e
+            | otherwise = UnliftIO.throwIO e
 
     sendfile writeBufferRef fid offset len hook headers = do
         writeBuffer <- readIORef writeBufferRef
@@ -115,13 +116,13 @@ socketConnection _ s = do
     sendall = sendAll' s
 
     sendAll' sock bs =
-        E.handleJust
+        UnliftIO.handleJust
             ( \e ->
                 if ioeGetErrorType e == ResourceVanished
                     then Just ConnectionClosedByPeer
                     else Nothing
             )
-            E.throwIO
+            UnliftIO.throwIO
             $ Sock.sendAll sock bs
 
 -- | Run an 'Application' on the given port.
@@ -151,7 +152,7 @@ runEnv p app = do
 runSettings :: Settings -> Application -> IO ()
 runSettings set app =
     withSocketsDo $
-        E.bracket
+        UnliftIO.bracket
             (bindPortTCP (settingsPort set) (settingsHost set))
             close
             ( \socket -> do
@@ -179,7 +180,7 @@ runSettingsSocket set@Settings{settingsAccept = accept'} socket app = do
         (s, sa) <- accept' socket
         setSocketCloseOnExec s
         -- NoDelay causes an error for AF_UNIX.
-        setSocketOption s NoDelay 1 `E.catch` throughAsync (return ())
+        setSocketOption s NoDelay 1 `UnliftIO.catchAny` \(UnliftIO.SomeException _) -> return ()
         conn <- socketConnection set s
         return (conn, sa)
 
@@ -244,7 +245,7 @@ withII set action =
     withTimeoutManager f = case settingsManager set of
         Just tm -> f tm
         Nothing ->
-            E.bracket
+            UnliftIO.bracket
                 (T.initialize timeoutInSeconds)
                 T.stopManager
                 f
@@ -275,7 +276,7 @@ acceptConnection set getConnMaker app counter ii = do
     -- acceptNewConnection and the registering of connClose.
     --
     -- acceptLoop can be broken by closing the listening socket.
-    void $ E.mask_ acceptLoop
+    void $ UnliftIO.mask_ acceptLoop
     -- In some cases, we want to stop Warp here without graceful shutdown.
     -- So, async exceptions are allowed here.
     -- That's why `finally` is not used.
@@ -283,7 +284,7 @@ acceptConnection set getConnMaker app counter ii = do
   where
     acceptLoop = do
         -- Allow async exceptions before receiving the next connection maker.
-        E.allowInterrupt
+        allowInterrupt
 
         -- acceptNewConnection will try to receive the next incoming
         -- request. It returns a /connection maker/, not a connection,
@@ -300,20 +301,17 @@ acceptConnection set getConnMaker app counter ii = do
                 acceptLoop
 
     acceptNewConnection = do
-        ex <- E.try getConnMaker
+        ex <- UnliftIO.tryIO getConnMaker
         case ex of
             Right x -> return $ Just x
             Left e -> do
-                let getErrno (Errno cInt) = cInt
-                    isErrno err = ioe_errno e == Just (getErrno err)
-                if | isErrno eCONNABORTED -> acceptNewConnection
-                   | isErrno eMFILE -> do
-                       settingsOnException set Nothing $ E.toException e
-                       waitForDecreased counter
-                       acceptNewConnection
-                   | otherwise -> do
-                       settingsOnException set Nothing $ E.toException e
-                       return Nothing
+                let eConnAborted = getErrno eCONNABORTED
+                    getErrno (Errno cInt) = cInt
+                if ioe_errno e == Just eConnAborted
+                    then acceptNewConnection
+                    else do
+                        settingsOnException set Nothing $ toException e
+                        return Nothing
 
 -- Fork a new worker thread for this connection maker, and ask for a
 -- function to unmask (i.e., allow async exceptions to be thrown).
@@ -325,9 +323,7 @@ fork
     -> Counter
     -> InternalInfo
     -> IO ()
-fork set mkConn addr app counter ii = settingsFork set $ \unmask -> do
-    tid <- myThreadId
-    labelThread tid "Warp just forked"
+fork set mkConn addr app counter ii = settingsFork set $ \unmask ->
     -- Call the user-supplied on exception code if any
     -- exceptions are thrown.
     --
@@ -335,7 +331,7 @@ fork set mkConn addr app counter ii = settingsFork set $ \unmask -> do
     -- catch all exceptions and avoid them from propagating, even
     -- async exceptions. See:
     -- https://github.com/yesodweb/wai/issues/850
-    E.handle (settingsOnException set Nothing) $
+    Control.Exception.handle (settingsOnException set Nothing) $
         -- Run the connection maker to get a new connection, and ensure
         -- that the connection is closed. If the mkConn call throws an
         -- exception, we will leak the connection. If the mkConn call is
@@ -346,16 +342,16 @@ fork set mkConn addr app counter ii = settingsFork set $ \unmask -> do
         -- We grab the connection before registering timeouts since the
         -- timeouts will be useless during connection creation, due to the
         -- fact that async exceptions are still masked.
-        E.bracket mkConn cleanUp (serve unmask)
+        UnliftIO.bracket mkConn cleanUp (serve unmask)
   where
     cleanUp (conn, _) =
-        connClose conn `E.finally` do
+        connClose conn `UnliftIO.finally` do
             writeBuffer <- readIORef $ connWriteBuffer conn
             bufFree writeBuffer
 
     -- We need to register a timeout handler for this thread, and
     -- cancel that handler as soon as we exit.
-    serve unmask (conn, transport) = T.withHandleKillThread (timeoutManager ii) (return ()) $ \th -> do
+    serve unmask (conn, transport) = UnliftIO.bracket register cancel $ \th -> do
         -- We now have fully registered a connection close handler in
         -- the case of all exceptions, so it is safe to once again
         -- allow async exceptions.
@@ -363,11 +359,14 @@ fork set mkConn addr app counter ii = settingsFork set $ \unmask -> do
             .
             -- Call the user-supplied code for connection open and
             -- close events
-            E.bracket (onOpen addr) (onClose addr)
+            UnliftIO.bracket (onOpen addr) (onClose addr)
             $ \goingon ->
                 -- Actually serve this connection.  bracket with closeConn
                 -- above ensures the connection is closed.
                 when goingon $ serveConnection conn ii th addr transport set app
+      where
+        register = T.registerKillThread (timeoutManager ii) (connClose conn)
+        cancel = T.cancel
 
     onOpen adr = increase counter >> settingsOnOpen set adr
     onClose adr _ = decrease counter >> settingsOnClose set adr
@@ -383,7 +382,6 @@ serveConnection
     -> IO ()
 serveConnection conn ii th origAddr transport settings app = do
     -- fixme: Upgrading to HTTP/2 should be supported.
-    tid <- myThreadId
     (h2, bs) <-
         if isHTTP2 transport
             then return (True, "")
@@ -394,10 +392,8 @@ serveConnection conn ii th origAddr transport settings app = do
                     else return (False, bs0)
     if settingsHTTP2Enabled settings && h2
         then do
-            labelThread tid ("Warp HTTP/2 " ++ show origAddr)
             http2 settings ii conn transport app origAddr th bs
         else do
-            labelThread tid ("Warp HTTP/1.1 " ++ show origAddr)
             http1 settings ii conn transport app origAddr th bs
   where
     recv4 bs0 = do

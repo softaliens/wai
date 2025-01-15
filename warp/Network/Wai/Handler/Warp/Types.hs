@@ -7,7 +7,7 @@ module Network.Wai.Handler.Warp.Types where
 import qualified Data.ByteString as S
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Typeable (Typeable)
-import qualified Control.Exception as E
+import qualified UnliftIO
 #ifdef MIN_VERSION_crypton_x509
 import Data.X509
 #endif
@@ -60,7 +60,7 @@ instance Show InvalidRequest where
     show RequestHeaderFieldsTooLarge = "Request header fields too large"
     show PayloadTooLarge = "Payload too large"
 
-instance E.Exception InvalidRequest
+instance UnliftIO.Exception InvalidRequest
 
 ----------------------------------------------------------------
 
@@ -70,10 +70,10 @@ instance E.Exception InvalidRequest
 --
 -- Used to determine whether keeping the HTTP1.1 connection / HTTP2 stream alive is safe
 -- or irrecoverable.
-newtype ExceptionInsideResponseBody = ExceptionInsideResponseBody E.SomeException
+newtype ExceptionInsideResponseBody = ExceptionInsideResponseBody UnliftIO.SomeException
     deriving (Show, Typeable)
 
-instance E.Exception ExceptionInsideResponseBody
+instance UnliftIO.Exception ExceptionInsideResponseBody
 
 ----------------------------------------------------------------
 

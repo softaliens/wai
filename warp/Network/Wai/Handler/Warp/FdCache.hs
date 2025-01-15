@@ -26,7 +26,7 @@ import System.Posix.IO (
     openFd,
     setFdOption,
  )
-import Control.Exception (bracket)
+import UnliftIO.Exception (bracket)
 #endif
 import System.Posix.Types (Fd)
 
@@ -120,7 +120,6 @@ initialize duration = MutableFdCache <$> mkReaper settings
             , reaperCons = uncurry insert
             , reaperNull = isEmpty
             , reaperEmpty = empty
-            , reaperThreadName = "Fd cacher (Reaper) "
             }
 
 clean :: FdCache -> IO (FdCache -> FdCache)

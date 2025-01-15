@@ -6,8 +6,6 @@ module ExceptionSpec (main, spec) where
 #if __GLASGOW_HASKELL__ < 709
 import Control.Applicative
 #endif
-import Control.Concurrent.Async (withAsync)
-import Control.Exception
 import Control.Monad
 import qualified Data.Streaming.Network as N
 import Network.HTTP.Types hiding (Header)
@@ -16,6 +14,8 @@ import Network.Wai hiding (Response, responseStatus)
 import Network.Wai.Handler.Warp
 import Network.Wai.Internal (Request (..))
 import Test.Hspec
+import UnliftIO.Async (withAsync)
+import UnliftIO.Exception
 
 import HTTP
 

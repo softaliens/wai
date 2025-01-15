@@ -1,28 +1,5 @@
 # ChangeLog for warp
 
-## 3.4.7
-
-* Using time-manager >= 0.2.
-
-## 3.4.6
-
-* Using `withHandle` of time-manager.
-
-## 3.4.5
-
-* Rethrowing asynchronous exceptions and preventing callsing
-  `connClose` twice.
-  [#1013](https://github.com/yesodweb/wai/pull/1013)
-
-## 3.4.4
-
-* Removing `unliftio`.
-
-## 3.4.3
-
-* Waiting untill the number of FDs desreases on EMFILE.
-  [#1009](https://github.com/yesodweb/wai/pull/1009)
-
 ## 3.4.2
 
 * serveConnection is re-exported from the Internal module.

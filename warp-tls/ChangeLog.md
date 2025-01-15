@@ -1,27 +1,5 @@
 # ChangeLog
 
-## 3.4.12
-
-* Rethrowing asynchronous exceptions
-  [#1013](https://github.com/yesodweb/wai/pull/1013)
-
-## 3.4.11
-
-* Removing `unliftio`.
-
-## 3.4.10
-
-* Removed `data-default` dependency entirely. Does now require `>= tls-2.1.3`.
-  [#1011](https://github.com/yesodweb/wai/pull/1011)
-
-## 3.4.9
-
-* Using `timeout` for `handshake` to prevent thread leaks.
-
-## 3.4.8
-
-* Substituted `data-default-class` for `data-default` [#1010](https://github.com/yesodweb/wai/pull/1010)
-
 ## 3.4.7
 
 * Expose `attachConn` to use post-handshake TLS connection.
